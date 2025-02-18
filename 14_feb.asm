@@ -7,11 +7,11 @@ start:
     mov si, 81h           ; Адрес командной строки в PSP
     call SkipSpaces       ; Пропуск пробелов
     call ConvertStringToInt      ; Читаем ширину (b)
-    mov [b], ax
+    mov [length], ax
 
     call SkipSpaces       ; Пропуск пробелов
     call ConvertStringToInt      ; Читаем высоту (a)
-    mov [a], ax
+    mov [height], ax
 
     call SkipSpaces       ; Пропуск пробелов
     call ConvertHexStringToInt     ; Читаем цвет
@@ -26,10 +26,10 @@ start:
     ; в DX лежит указатель на начало стиля рамки
     ; SI указывает на начало строки для вывода в рамке
     ; в AH лежит атрбут цвета
-    ; в [b] , [a] длина и высота рамки
+    ; в [length] , [height] длина и высота рамки
 
 
-    mov si , dx
+    ; mov si , dx
 
 
     push ax
@@ -42,12 +42,21 @@ start:
 
     push ax
     push dx
-    mov ax , [b]
+    mov ax , [length]
     xor ah , ah
-    mov dx , 0
+    xor dx , dx
     mov cx , 6
     div cx
     mov bx , ax
+
+    mov ax , [length]  ; ax = конечная ширина
+    sub ax, bx         ; ax = разница (сколько надо прибавить)
+    xor ah, ah
+    mov dx, 0
+    mov cx, 6
+    div cx             ; delta = разница / 6
+    mov si, ax         ; Сохраняем шаг увеличения
+    mov di, dx         ; Сохраняем остаток
     pop dx
     pop ax
 
@@ -66,6 +75,8 @@ start:
 Zoom_Frame:
 
     push cx
+    push si
+    push di
 
     call Level_out
 
@@ -74,7 +85,7 @@ Zoom_Frame:
     call PrintRow
 
                            ; Вывод средних строк
-    mov cx, [a]            ; CX = высота рамки
+    mov cx, [height]            ; CX = высота рамки
     call PrintMiddleRows
 
     ; Вывод нижней строки
@@ -84,7 +95,15 @@ Zoom_Frame:
 
     call Delay
 
-    add bx , 10
+    pop di
+    cmp di, 0        ; Если есть остаток
+    jz no_remainder
+    add bx, 1        ; Увеличиваем ширину на 1 (учитываем остаток)
+    dec di           ; Уменьшаем счётчик оставшихся итераций с остатком
+
+no_remainder:
+    pop si
+    add bx, si       ; Увеличиваем ширину рамки на delta
 
     pop cx
     dec cx
@@ -131,7 +150,7 @@ Calculate_Offset_For_String:
     add di, ax        ; Смещаем DI на центр рамки
 
     ; ---- Вертикальное центрирование ----
-    mov ax, [a]       ; Высота рамки
+    mov ax, [height]       ; Высота рамки
     shr ax, 1
     mov bx, 80 * 2
     mul bx            ; ax = (a / 2) * 160
@@ -257,7 +276,7 @@ Delay:
 
     mov si , 0
     mov ah , 86h
-    mov cx , 0
+    mov cx , 2
     mov dx , 50000
     int 15h
 
@@ -279,7 +298,7 @@ Level_out:
     push dx
     ; ---- Горизонтальное центрирование ----
     mov ax, 80             ; Ширина экрана (80 символов)
-    ; mov bx, [b]            ; Ширина рамки
+    ; mov bx, [length]            ; Ширина рамки
     shr ax, 1              ; 80 / 2
     shr bx, 1              ; b/2
     sub ax, bx             ; 40 - (b/2) = X-координата начала рамки
@@ -288,7 +307,7 @@ Level_out:
 
     ; ---- Вертикальное центрирование ----
     mov cx, 25             ; Высота экрана (25 строк)
-    sub cx, [a]            ; (25 - a)
+    sub cx, [height]            ; (25 - a)
     shr cx , 1
     mov ax , 160
     mul cx
@@ -306,23 +325,23 @@ Level_out:
 
 GetFrameStyle:
     push ax
-    push si
     xor ah , ah
-    lodsb       ; Загружаем число стиля
-    cmp al, '0'        ; Проверяем, если 0
-    je  GetCustomStyle  ; Если 0, читаем стиль вручную
-    cmp al, '1'        ; Если от 1 до 5
-    jl  Done_2           ; Если меньше 1 (неправильный ввод), выходим
-    cmp al, '5'        ; Проверяем, если больше 5
-    jg  Done_2           ; Если больше 5, выходим
+    lodsb
+    cmp al, '0'
+    je  GetCustomStyle
+    push si
+    cmp al, '1'
+    jl  End_GetFrameStyle
+    cmp al, '5'
+    jg  End_GetFrameStyle
 
-    ; Загружаем стиль рамки из массива, который у тебя заранее подготовлен
-    sub al, '1'         ; Преобразуем 1..5 в 0..4
-    ; mov bl, al          ; Сохраняем индекс стиля в BL
-    lea si, [frameStyles]  ; Адрес массива стилей рамки
-    mov cx, 9           ; Длина одного стиля рамки (9 символов)
-    mul cx              ; Умножаем индекс на 9
-    add si, ax          ; Получаем адрес стиля (si + индекс * 9)
+
+    sub al, '1'
+    ; mov bl, al
+    lea si, [frameStyles]
+    mov cx, 9
+    mul cx
+    add si, ax
 
     mov dx , si         ; SAVVVEEEE
 
@@ -331,9 +350,8 @@ GetFrameStyle:
     call SkipSpaces
     inc si              ; После этого SI указывает на начло строки для вывода в рамке
 
-    pop ax
 
-    jmp Done_2
+    jmp End_GetFrameStyle
 ;
 GetCustomStyle:
     ; В случае числа 0, указываем на стиль, который ввёл пользователь
@@ -346,9 +364,10 @@ GetCustomStyle:
     call SkipSpaces
     inc si              ;После этого SI указывает на начло строки для вывода в рамке
 
-Done_2:
+End_GetFrameStyle:
     ; Теперь DX указывает на нужный стиль рамки (либо из массива, либо введённый вручную)
     ;а SI указывает на начала строки для вывода в рамке
+    pop ax
 
     ret
 
@@ -404,9 +423,9 @@ ConvertStringToInt:
 ConvertLoop:
     mov al, [si]       ; Загружаем текущий символ
     cmp al, '0'           ; Проверяем, что >= '0'
-    jl  Done              ; Если меньше, завершаем
+    jl  End_ConvertStringToInt             ; Если меньше, завершаем
     cmp al, '9'           ; Проверяем, что <= '9'
-    jg  Done              ; Если больше, завершаем
+    jg  End_ConvertStringToInt             ; Если больше, завершаем
     sub al, '0'           ; Преобразуем символ в число (ASCII → int)
     mov ah, [si + 1]      ; Загружаем следующий символ
     cmp ah, '0'           ; Проверяем, что это цифра
@@ -424,7 +443,7 @@ LastDigit:
     add bx, ax
     inc si
 
-Done:
+End_ConvertStringToInt:
     mov ax, bx            ; Переносим результат в AX
     ret
 
@@ -440,11 +459,11 @@ ConvertHexStringToInt:
 ConvertHexLoop:
     mov al, [si]       ; Загружаем текущий символ
     cmp al, 0          ; Проверяем конец строки (нулевой байт)
-    je Done_1           ; Если конец строки, выходим
+    je End_ConvertHexStringToInt           ; Если конец строки, выходим
 
     ; Проверка на цифры '0'-'9'
     cmp al, '0'
-    jl  Done_1          ; Если меньше '0', завершаем
+    jl  End_ConvertHexStringToInt          ; Если меньше '0', завершаем
     cmp al, '9'
     jg  CheckLetter     ; Если больше '9', проверяем буквы 'A'-'F'
     sub al, '0'         ; Преобразуем ASCII-цифру в число (0-9)
@@ -452,9 +471,9 @@ ConvertHexLoop:
 
 CheckLetter:
     cmp al, 'A'
-    jl  Done_1          ; Если символ меньше 'A', это не HEX-цифра
+    jl  End_ConvertHexStringToInt          ; Если символ меньше 'A', это не HEX-цифра
     cmp al, 'F'
-    jg  Done_1          ; Если больше 'F', тоже не HEX-цифра
+    jg  End_ConvertHexStringToInt          ; Если больше 'F', тоже не HEX-цифра
     sub al, 'A' - 10    ; Преобразуем 'A'-'F' в 10-15
 
 ProcessDigit:
@@ -465,7 +484,7 @@ ProcessDigit:
     inc si              ; Переход к следующему символу
     jmp ConvertHexLoop  ; Повторяем цикл
 
-Done_1:
+End_ConvertHexStringToInt:
     mov ah, bl          ; Переносим результат в AH (вместо AX)
     ret
 
@@ -473,11 +492,11 @@ Done_1:
 
 
 .data
-a           dw 6
-b           dw 60
-numstyle    dw 1
-addr_mas_style dw 1
-frameStyles db '#########', '+++++++++', '=========', '*********', '@@@@@@@@@'
-love_string db 'Hello$', 0  ; Строка для вывода (с символом $ в конце)
+height           dw 6
+length           dw 60
+numstyle         dw 1
+addr_mas_style   dw 1
+frameStyles      db '#########', '+++++++++', '=========', '*********', '@@@@@@@@@'
+love_string      db 'Hello$', 0  ; Строка для вывода (с символом $ в конце)
 
 end start
