@@ -297,7 +297,7 @@ Level_out:
     push bx
     push dx
     ; ---- Горизонтальное центрирование ----
-    mov ax, 80             ; Ширина экрана (80 символов)
+    mov ax, [len_terminal]            ; Ширина экрана (80 символов)
     ; mov bx, [length]            ; Ширина рамки
     shr ax, 1              ; 80 / 2
     shr bx, 1              ; b/2
@@ -492,6 +492,7 @@ End_ConvertHexStringToInt:
 
 
 .data
+len_terminal     db 80
 height           dw 6
 length           dw 60
 numstyle         dw 1
